@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Network Diagram — Packet Analysis</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #f8f9fb; color: #2c3e50; font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden; }
+
+#drop-zone {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; z-index: 100;
+  background: #f8f9fb; transition: background 0.3s;
+}
+#drop-zone.drag-over { background: #e8ecf2; }
+#drop-zone.hidden { display: none; }
+
+.drop-icon { font-size: 72px; margin-bottom: 16px; opacity: 0.5; }
+.drop-title { font-size: 22px; font-weight: 600; margin-bottom: 8px; color: #2c3e50; }
+.drop-subtitle { font-size: 14px; color: #7a8ba8; text-align: center; max-width: 440px; line-height: 1.6; }
+
+#toolbar {
+  position: absolute; top: 12px; left: 12px; z-index: 50;
+  display: flex; flex-wrap: wrap; gap: 6px; max-width: calc(100vw - 24px);
+}
+.filter-btn {
+  padding: 5px 14px; border-radius: 20px; border: 1px solid #c5cdd8;
+  background: #fff; color: #5a6a80; cursor: pointer; font-size: 12px;
+  transition: all 0.2s; user-select: none;
+}
+.filter-btn.active { background: #1a3050; color: #fff; border-color: #1a3050; }
+.filter-btn:hover { background: #e8ecf2; color: #334; }
+.filter-btn.active:hover { background: #244060; color: #fff; }
+
+#stats {
+  position: absolute; bottom: 12px; left: 12px; z-index: 50;
+  background: rgba(255,255,255,0.92); border: 1px solid #d0d7e2;
+  border-radius: 8px; padding: 10px 16px; font-size: 12px; color: #5a6a80;
+  display: none;
+}
+#stats span { color: #2c3e50; font-weight: 600; }
+
+#reload-btn {
+  position: absolute; top: 12px; right: 12px; z-index: 50;
+  padding: 6px 16px; border-radius: 8px; border: 1px solid #c5cdd8;
+  background: #fff; color: #5a6a80; cursor: pointer; font-size: 12px;
+  display: none; transition: all 0.2s;
+}
+#reload-btn:hover { background: #e8ecf2; color: #334; }
+
+#legend {
+  position: absolute; bottom: 12px; right: 12px; z-index: 50;
+  background: rgba(255,255,255,0.92); border: 1px solid #d0d7e2;
+  border-radius: 8px; padding: 10px 14px; font-size: 11px;
+  display: none;
+}
+#legend .legend-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+#legend .legend-swatch { width: 28px; height: 3px; border-radius: 2px; }
+
+#config-toggle {
+  position: absolute; top: 52px; right: 12px; z-index: 55;
+  padding: 5px 12px; border-radius: 6px; border: 1px solid #c5cdd8;
+  background: #fff; color: #5a6a80; cursor: pointer; font-size: 12px;
+  display: none; transition: all 0.2s;
+}
+#config-toggle:hover { background: #e8ecf2; }
+
+#config-panel {
+  position: absolute; top: 82px; right: 12px; z-index: 54;
+  width: 260px; background: rgba(255,255,255,0.96); border: 1px solid #d0d7e2;
+  border-radius: 10px; padding: 16px; font-size: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  display: none;
+}
+#config-panel.open { display: block; }
+
+.config-group { margin-bottom: 14px; }
+.config-group:last-child { margin-bottom: 0; }
+.config-label { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; color: #3a4a60; font-weight: 500; }
+.config-value { color: #1a3050; font-weight: 700; font-size: 12px; min-width: 36px; text-align: right; }
+.config-group input[type=range] {
+  width: 100%; height: 4px; -webkit-appearance: none; appearance: none;
+  background: #d0d7e2; border-radius: 2px; outline: none;
+}
+.config-group input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+  background: #1a3050; cursor: pointer; border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+.config-group input[type=range]::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #1a3050; cursor: pointer; border: 2px solid #fff;
+}
+
+svg { position: absolute; inset: 0; }
+
+.link { stroke-opacity: 0.55; fill: none; }
+.node-circle { stroke-width: 2; cursor: grab; fill-opacity: 0.85; }
+.node-circle:hover { stroke-width: 3; }
+.node-label { fill: #1e2d3d; font-size: 10.5px; pointer-events: none; font-weight: 500; }
+.node-count { fill: #5a7a9c; font-size: 8.5px; pointer-events: none; }
+
+.tooltip {
+  position: absolute; background: rgba(255,255,255,0.96); border: 1px solid #b0bcd0;
+  border-radius: 6px; padding: 8px 12px; font-size: 12px; z-index: 200;
+  pointer-events: none; opacity: 0; transition: opacity 0.15s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+.tooltip.visible { opacity: 1; }
+.tooltip .tt-ip { font-weight: 600; color: #2c3e50; }
+.tooltip .tt-detail { color: #5a6a80; font-size: 11px; margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<div id="drop-zone">
+  <div class="drop-icon">&#128194;</div>
+  <div class="drop-title">Drop JSON files here</div>
+  <div class="drop-subtitle">Drag & drop one or more packet capture JSON files to generate a network diagram</div>
+</div>
+
+<div id="toolbar"></div>
+<button id="reload-btn" onclick="location.reload()">&#8635; Reset</button>
+<button id="config-toggle" onclick="toggleConfig()">&#9881; Settings</button>
+<div id="config-panel">
+  <div class="config-group">
+    <div class="config-label"><span>Label threshold (min packets)</span><span class="config-value" id="val-threshold">20</span></div>
+    <input type="range" id="cfg-threshold" min="0" max="500" step="1" value="20" oninput="onConfigChange()">
+  </div>
+  <div class="config-group">
+    <div class="config-label"><span>Repulsion strength</span><span class="config-value" id="val-repulsion">-40</span></div>
+    <input type="range" id="cfg-repulsion" min="-500" max="-5" step="5" value="-40" oninput="onConfigChange()">
+  </div>
+  <div class="config-group">
+    <div class="config-label"><span>Link distance</span><span class="config-value" id="val-distance">50</span></div>
+    <input type="range" id="cfg-distance" min="20" max="300" step="5" value="50" oninput="onConfigChange()">
+  </div>
+  <div class="config-group">
+    <div class="config-label"><span>Node size multiplier</span><span class="config-value" id="val-nodesize">28</span></div>
+    <input type="range" id="cfg-nodesize" min="5" max="60" step="1" value="28" oninput="onConfigChange()">
+  </div>
+  <div class="config-group">
+    <div class="config-label"><span>Link strength</span><span class="config-value" id="val-linkstr">0.70</span></div>
+    <input type="range" id="cfg-linkstr" min="0.1" max="1" step="0.05" value="0.70" oninput="onConfigChange()">
+  </div>
+</div>
+<div id="stats"></div>
+<div id="legend"></div>
+<div class="tooltip" id="tooltip"></div>
+<svg id="graph"></svg>
+
+<script>
+const PROTOCOL_COLORS = {
+  arp:    '#f59e0b',
+  dhcp:   '#a78bfa',
+  dns:    '#34d399',
+  http:   '#60a5fa',
+  icmp:   '#f87171',
+  mqtt:   '#fb923c',
+  quic:   '#c084fc',
+  tcp:    '#38bdf8',
+  tls:    '#2dd4bf',
+};
+
+let allData = {};
+let activeProtocols = new Set();
+let simulation, linksLayer, nodesLayer;
+let currentNodes = [], currentEdges = [];
+
+function getConfig() {
+  return {
+    threshold: parseInt(document.getElementById('cfg-threshold').value),
+    repulsion: parseInt(document.getElementById('cfg-repulsion').value),
+    distance: parseInt(document.getElementById('cfg-distance').value),
+    nodeSize: parseInt(document.getElementById('cfg-nodesize').value),
+    linkStr: parseFloat(document.getElementById('cfg-linkstr').value),
+  };
+}
+
+function onConfigChange() {
+  const cfg = getConfig();
+  document.getElementById('val-threshold').textContent = cfg.threshold;
+  document.getElementById('val-repulsion').textContent = cfg.repulsion;
+  document.getElementById('val-distance').textContent = cfg.distance;
+  document.getElementById('val-nodesize').textContent = cfg.nodeSize;
+  document.getElementById('val-linkstr').textContent = cfg.linkStr.toFixed(2);
+  renderGraph();
+}
+
+function toggleConfig() {
+  document.getElementById('config-panel').classList.toggle('open');
+}
+
+function getIPs(pkt) {
+  let src = pkt['ip_origen'] || pkt['IP origen'];
+  let dst = pkt['ip_destino'] || pkt['IP destino'];
+  if (!src || !dst) return null;
+  return { src, dst };
+}
+
+function getProtocol(pkt, filename) {
+  if (pkt.layer_name) return pkt.layer_name.toLowerCase();
+  if (pkt.db_name) return pkt.db_name.replace('.log', '').toLowerCase();
+  const match = filename.match(/^(ARP|DHCP|DNS|HTTP|ICMP|MQTT|QUIC|TCP|TLS)/i);
+  return match ? match[1].toLowerCase() : 'unknown';
+}
+
+function processData(fileMap) {
+  allData = {};
+  for (const [fname, pkts] of Object.entries(fileMap)) {
+    for (const pkt of pkts) {
+      const ips = getIPs(pkt);
+      if (!ips) continue;
+      const proto = getProtocol(pkt, fname);
+      if (!allData[proto]) allData[proto] = { edges: {}, nodes: {} };
+      const key = `${ips.src}|${ips.dst}`;
+      if (!allData[proto].edges[key]) allData[proto].edges[key] = { src: ips.src, dst: ips.dst, count: 0 };
+      allData[proto].edges[key].count++;
+      if (!allData[proto].nodes[ips.src]) allData[proto].nodes[ips.src] = 0;
+      if (!allData[proto].nodes[ips.dst]) allData[proto].nodes[ips.dst] = 0;
+      allData[proto].nodes[ips.src]++;
+      allData[proto].nodes[ips.dst]++;
+    }
+  }
+  activeProtocols = new Set(Object.keys(allData));
+  buildToolbar();
+  buildLegend();
+  document.getElementById('config-toggle').style.display = 'block';
+  renderGraph();
+}
+
+function buildToolbar() {
+  const tb = document.getElementById('toolbar');
+  tb.innerHTML = '';
+  const protos = Object.keys(allData).sort();
+  const allBtn = document.createElement('button');
+  allBtn.className = 'filter-btn active';
+  allBtn.textContent = 'ALL';
+  allBtn.onclick = () => {
+    activeProtocols = new Set(protos);
+    tb.querySelectorAll('.filter-btn').forEach(b => b.classList.add('active'));
+    renderGraph();
+  };
+  tb.appendChild(allBtn);
+
+  for (const p of protos) {
+    const btn = document.createElement('button');
+    btn.className = 'filter-btn active';
+    btn.style.borderColor = PROTOCOL_COLORS[p] || '#2a3a5c';
+    btn.textContent = p.toUpperCase();
+    btn.onclick = () => {
+      if (activeProtocols.has(p)) { activeProtocols.delete(p); btn.classList.remove('active'); }
+      else { activeProtocols.add(p); btn.classList.add('active'); }
+      renderGraph();
+    };
+    tb.appendChild(btn);
+  }
+}
+
+function buildLegend() {
+  const leg = document.getElementById('legend');
+  leg.innerHTML = '<div style="font-weight:600;margin-bottom:4px;color:#2c3e50;">Protocols</div>';
+  for (const [p, c] of Object.entries(PROTOCOL_COLORS)) {
+    if (!allData[p]) continue;
+    leg.innerHTML += `<div class="legend-row"><div class="legend-swatch" style="background:${c}"></div>${p.toUpperCase()}</div>`;
+  }
+  leg.style.display = 'block';
+}
+
+function renderGraph() {
+  if (simulation) simulation.stop();
+
+  const cfg = getConfig();
+  const svg = d3.select('#graph');
+  svg.selectAll('*').remove();
+  svg.attr('width', window.innerWidth).attr('height', window.innerHeight);
+
+  const width = window.innerWidth, height = window.innerHeight;
+
+  let edges = [];
+  let nodePackets = {};
+
+  for (const proto of activeProtocols) {
+    if (!allData[proto]) continue;
+    for (const e of Object.values(allData[proto].edges)) {
+      edges.push({ src: e.src, dst: e.dst, count: e.count, proto });
+    }
+    for (const [ip, cnt] of Object.entries(allData[proto].nodes)) {
+      nodePackets[ip] = (nodePackets[ip] || 0) + cnt;
+    }
+  }
+
+  const nodeSet = new Set();
+  edges.forEach(e => { nodeSet.add(e.src); nodeSet.add(e.dst); });
+  const nodes = [...nodeSet].map(id => ({
+    id,
+    packets: nodePackets[id] || 0,
+  }));
+
+  const maxPackets = d3.max(nodes, d => d.packets) || 1;
+
+  nodes.forEach(d => {
+    d.radius = 6 + (d.packets / maxPackets) * cfg.nodeSize;
+    d.opacity = 0.55 + (d.packets / maxPackets) * 0.45;
+  });
+
+  const edgeMap = {};
+  edges.forEach(e => {
+    const k = `${e.src}->${e.dst}|${e.proto}`;
+    if (!edgeMap[k]) edgeMap[k] = { source: e.src, target: e.dst, count: 0, proto: e.proto };
+    edgeMap[k].count += e.count;
+  });
+  const graphEdges = Object.values(edgeMap);
+
+  const maxEdge = d3.max(graphEdges, d => d.count) || 1;
+
+  simulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(graphEdges).id(d => d.id).distance(cfg.distance).strength(cfg.linkStr))
+    .force('charge', d3.forceManyBody().strength(cfg.repulsion))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('collision', d3.forceCollide().radius(d => d.radius + 2));
+
+  const g = svg.append('g');
+
+  const zoom = d3.zoom().scaleExtent([0.15, 6]).on('zoom', (event) => g.attr('transform', event.transform));
+  svg.call(zoom);
+
+  linksLayer = g.append('g');
+  nodesLayer = g.append('g');
+
+  const link = linksLayer.selectAll('line')
+    .data(graphEdges)
+    .enter().append('line')
+    .attr('class', 'link')
+    .attr('stroke', d => PROTOCOL_COLORS[d.proto] || '#4a6a9c')
+    .attr('stroke-width', d => 1 + (d.count / maxEdge) * 4);
+
+  const nodeGroup = nodesLayer.selectAll('g')
+    .data(nodes)
+    .enter().append('g')
+    .call(d3.drag()
+      .on('start', (event, d) => {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      })
+      .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+      .on('end', (event, d) => {
+        if (!event.active) simulation.alphaTarget(0);
+      })
+    );
+
+  nodeGroup.append('circle')
+    .attr('class', 'node-circle')
+    .attr('r', d => d.radius)
+    .attr('fill', d => {
+      const protoMatches = edges.filter(e => e.src === d.id || e.dst === d.id);
+      const protos = [...new Set(protoMatches.map(e => e.proto))];
+      if (protos.length === 1) return PROTOCOL_COLORS[protos[0]] || '#4a80cc';
+      return '#4a80cc';
+    })
+    .attr('fill-opacity', d => d.opacity)
+    .attr('stroke', d => {
+      const protoMatches = edges.filter(e => e.src === d.id || e.dst === d.id);
+      const protos = [...new Set(protoMatches.map(e => e.proto))];
+      if (protos.length === 1) return d3.color(PROTOCOL_COLORS[protos[0]] || '#4a80cc').darker(0.6);
+      return '#2563a8';
+    })
+    .on('mouseover', (event, d) => {
+      const tt = document.getElementById('tooltip');
+      const protoMatches = edges.filter(e => e.src === d.id || e.dst === d.id);
+      const protos = [...new Set(protoMatches.map(e => e.proto))].sort();
+      tt.innerHTML = `<div class="tt-ip">${d.id}</div><div class="tt-detail">${d.packets} packets &middot; ${protos.map(p => p.toUpperCase()).join(', ')}</div>`;
+      tt.style.left = (event.pageX + 12) + 'px';
+      tt.style.top = (event.pageY - 10) + 'px';
+      tt.classList.add('visible');
+    })
+    .on('mouseout', () => {
+      document.getElementById('tooltip').classList.remove('visible');
+    });
+
+  nodeGroup.append('text')
+    .attr('class', 'node-label')
+    .attr('dy', d => -d.radius - 4)
+    .attr('text-anchor', 'middle')
+    .text(d => d.packets >= cfg.threshold ? d.id : '');
+
+  nodeGroup.append('text')
+    .attr('class', 'node-count')
+    .attr('dy', d => d.packets >= cfg.threshold ? -d.radius - 15 : -d.radius - 4)
+    .attr('text-anchor', 'middle')
+    .text(d => `${d.packets} pkts`);
+
+  simulation.on('tick', () => {
+    link
+      .attr('x1', d => d.source.x)
+      .attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x)
+      .attr('y2', d => d.target.y);
+    nodeGroup.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+
+  const totalNodes = nodes.length;
+  const totalEdges = graphEdges.length;
+  const statsEl = document.getElementById('stats');
+  statsEl.innerHTML = `Nodes: <span>${totalNodes}</span> &middot; Connections: <span>${totalEdges}</span> &middot; Protocols: <span>${activeProtocols.size}</span>`;
+  statsEl.style.display = 'block';
+  document.getElementById('reload-btn').style.display = 'block';
+}
+
+const dropZone = document.getElementById('drop-zone');
+let fileMap = {};
+
+document.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+document.addEventListener('dragleave', e => { e.preventDefault(); dropZone.classList.remove('drag-over'); });
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const files = e.dataTransfer.files;
+  if (!files.length) return;
+
+  let pending = files.length;
+  for (const file of files) {
+    if (!file.name.endsWith('.json')) { pending--; continue; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        const proto = file.name.match(/^(ARP|DHCP|DNS|HTTP|ICMP|MQTT|QUIC|TCP|TLS)/i);
+        const key = proto ? proto[1].toUpperCase() : file.name.replace('.json', '');
+        fileMap[key] = data;
+      } catch (err) { console.error('Error parsing', file.name, err); }
+      pending--;
+      if (pending === 0) {
+        dropZone.classList.add('hidden');
+        processData(fileMap);
+      }
+    };
+    reader.readAsText(file);
+  }
+});
+</script>
+</body>
+</html>
