@@ -18,6 +18,9 @@ La aplicación analiza automáticamente relaciones entre direcciones IP y genera
 
 Todo el procesamiento ocurre localmente en el navegador, sin servidores, sin backend y sin transmisión externa de datos.
 
+
+<img width="1371" height="648" alt="image" src="https://github.com/user-attachments/assets/13b1cffe-eea6-4ad9-9d81-82651d83ae96" />
+
 ---
 
 # Arquitectura General
